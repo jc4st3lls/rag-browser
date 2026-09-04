@@ -1,0 +1,57 @@
+services:
+  # 1. Base de datos PostgreSQL con extensión pgvector
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: rag-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ragdb
+    ports:
+      - "15432:5432"
+    volumes:
+      # Persistencia de la base de datos en el directorio del usuario
+      - "${HOME}/Data/rag-browser/database:/var/lib/postgresql/data"
+      # Inicialización automática de tablas y extensiones desde la migración SQL
+      - "./backend/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ragdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Backend en Rust (Axum + Candle Embeddings + Parser de PDF)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile_backend
+    container_name: rag-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/ragdb
+      FILES_DIR: /data/files
+      HF_HOME: /data/cache/huggingface
+      RUST_LOG: info
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persistencia de los archivos PDF y caché de modelos del backend
+      - "${HOME}/Data/rag-browser/files:/data/files"
+
+  # 3. Frontend Web (Vite + Nginx + WebLLM + Candle WASM)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile_frontend
+    container_name: rag-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "3000:80"
+      - "5173:80"

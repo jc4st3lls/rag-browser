@@ -1,0 +1,30 @@
+# Dockerfile para el Backend en Rust (Axum + Candle + pgvector)
+FROM rust:latest AS builder
+
+# Instalar dependencias del sistema para compilar dependencias C (onig, openssl)
+
+WORKDIR /usr/src/backend
+COPY backend .
+
+# Compilar binario optimizado para producción
+RUN cargo install --path .
+
+# Imagen final ligera de ejecución
+FROM debian:trixie-slim AS final
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+    
+# Copiar el binario compilado
+COPY --from=builder /usr/local/cargo/bin/rag-backend /usr/local/bin/backend
+
+# Directorio de volumen para almacenar archivos PDF y caché del modelo
+ENV FILES_DIR=/data/files
+ENV HF_HOME=/data/cache/huggingface
+
+EXPOSE 8080
+
+
+CMD ["/usr/local/bin/backend"]

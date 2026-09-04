@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>In-browser RAG (Rust/WASM)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; background: #fafafa; }
+    h1 { margin-bottom: 0.25rem; font-size: 1.75rem; }
+    .subtitle { color: #666; margin-top: 0; margin-bottom: 1.25rem; font-size: 0.95rem; }
+    .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1.25rem; margin-bottom: 1.5rem; box-shadow: 0 2px 5px rgba(0,0,0,0.03); }
+    .card h2 { font-size: 1.15rem; margin-top: 0; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between; }
+    textarea { width: 100%; height: 5rem; padding: 0.6rem; font-family: inherit; font-size: 1rem; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 6px; }
+    textarea:focus { outline: none; border-color: #0284c7; box-shadow: 0 0 0 2px rgba(2,132,199,0.15); }
+    .btn-row { display: flex; gap: 0.5rem; margin-top: 0.6rem; align-items: center; }
+    button { padding: 0.55rem 1.3rem; font-size: 0.95rem; font-weight: 600; cursor: pointer; border-radius: 6px; background: #0284c7; color: white; border: none; transition: background 0.15s; }
+    button:disabled { background: #cbd5e1; cursor: not-allowed; }
+    button:hover:not(:disabled) { background: #0369a1; }
+    .btn-secondary { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; font-size: 0.85rem; padding: 0.45rem 0.8rem; font-weight: 500; }
+    .btn-secondary:hover:not(:disabled) { background: #e2e8f0; }
+    
+    /* Metrics */
+    .metrics-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.8rem; }
+    .metric-badge { background: #f1f5f9; border: 1px solid #e2e8f0; padding: 0.25rem 0.6rem; border-radius: 4px; color: #475569; }
+    
+    /* Retrieved Chunks */
+    .chunks-container { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+    .chunk-item { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 3px solid #0284c7; border-radius: 4px; padding: 0.6rem 0.8rem; font-size: 0.88rem; }
+    .chunk-header { display: flex; justify-content: space-between; font-weight: 600; color: #0369a1; margin-bottom: 0.3rem; font-size: 0.82rem; }
+    .chunk-score { background: #e0f2fe; color: #0369a1; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.75rem; font-weight: 500; }
+    
+    /* LLM Output */
+    #output { white-space: pre-wrap; line-height: 1.6; border-left: 3px solid #10b981; padding: 0.85rem 1rem; margin-top: 1rem; min-height: 3rem; background: #f0fdf4; border-radius: 0 8px 8px 0; color: #1e293b; font-size: 0.95rem; }
+    
+    #status { color: #475569; font-size: 0.9rem; margin-bottom: 0.75rem; padding: 0.4rem 0.6rem; background: #e2e8f0; border-radius: 6px; display: inline-block; }
+    #pdf-status { color: #475569; font-size: 0.85rem; margin-top: 0.5rem; }
+    .file-dropzone { border: 2px dashed #94a3b8; border-radius: 6px; padding: 1.25rem; text-align: center; cursor: pointer; background: #f8fafc; transition: all 0.15s; }
+    .file-dropzone:hover { border-color: #0284c7; background: #f0f9ff; }
+    .error { color: #dc2626 !important; font-weight: 600; }
+    .success { color: #16a34a !important; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>In-Browser RAG</h1>
+  <p class="subtitle">Embeddings (Candle/WASM) + Vector Search (Postgres) + LLM (Flare/WASM)</p>
+  
+  <div id="status">Initializing and downloading models…</div>
+
+  <!-- Section to load and index PDFs -->
+  <div class="card">
+    <h2><span>📄 Load PDF document</span></h2>
+    <input type="file" id="pdf-input" accept="application/pdf" style="display: none;" />
+    <div class="file-dropzone" id="pdf-dropzone">
+      <span>Drag a PDF file here or <strong>click to browse</strong></span>
+    </div>
+    <div id="pdf-status"></div>
+  </div>
+
+  <!-- Inquiry section -->
+  <div class="card">
+    <h2>
+      <span>💬 Ask questions about the documents</span>
+      <button id="clear-cache" class="btn-secondary" title="Reset and delete cached models">Clear model cache</button>
+    </h2>
+    <div style="margin-bottom: 0.8rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #475569;">
+      <label for="model-select" style="font-weight: 500;">Select LLM Model:</label>
+      <select id="model-select" style="padding: 0.35rem 0.6rem; border-radius: 6px; border: 1px solid #cbd5e1; background: #ffffff; color: #1e293b; font-family: inherit; font-size: 0.85rem; cursor: pointer; outline: none;">
+        <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen 2.5 0.5B (Ultralight ~350MB)</option>
+        <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC" selected>Llama 3.2 1B (Fast & Smart ~750MB)</option>
+        <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen 2.5 1.5B (Excellent Balance ~1GB)</option>
+        <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama 3.2 3B (Powerful but Heavy ~2GB)</option>
+      </select>
+    </div>
+    <textarea id="query" placeholder="Type your question... (e.g., What problem does Bitcoin solve?)"></textarea>
+    <div class="btn-row">
+      <button id="ask" disabled>Ask Question</button>
+    </div>
+
+    <!-- Live metrics -->
+    <div class="metrics-bar" id="metrics-bar" style="display: none;"></div>
+
+    <!-- Final generated response -->
+    <h3 style="font-size: 0.95rem; margin-top: 1.25rem; margin-bottom: 0.5rem; color: #475569;">
+      🤖 Generated response:
+    </h3>
+    <div id="output"><em>The response will appear here...</em></div>
+
+    <!-- Chunks retrieved from DB -->
+    <div id="chunks-section" style="display: none;">
+      <h3 style="font-size: 0.95rem; margin-top: 1.25rem; margin-bottom: 0.5rem; color: #475569;">
+        📚 Retrieved chunks from backend (Context):
+      </h3>
+      <div class="chunks-container" id="chunks-container"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { warmUp, ask, ingestPdf } from "./main.js";
+    import { clearModelCache } from "./modelCache.js";
+
+    const statusEl = document.getElementById("status");
+    const askBtn = document.getElementById("ask");
+    const clearCacheBtn = document.getElementById("clear-cache");
+    const queryEl = document.getElementById("query");
+    const outputEl = document.getElementById("output");
+    const metricsBar = document.getElementById("metrics-bar");
+    const chunksSection = document.getElementById("chunks-section");
+    const chunksContainer = document.getElementById("chunks-container");
+
+    const pdfInput = document.getElementById("pdf-input");
+    const pdfDropzone = document.getElementById("pdf-dropzone");
+    const pdfStatus = document.getElementById("pdf-status");
+    const modelSelect = document.getElementById("model-select");
+
+    let isReady = false;
+    let isGenerating = false;
+    let isIngesting = false;
+
+    clearCacheBtn.addEventListener("click", async () => {
+      if (confirm("Do you want to clear the downloaded models cache and reload?")) {
+        await clearModelCache();
+        location.reload();
+      }
+    });
+
+    function loadActiveModel(modelName) {
+      isReady = false;
+      askBtn.disabled = true;
+      statusEl.className = "";
+      statusEl.textContent = "Loading LLM model…";
+
+      warmUp(({ stage, file, loaded, total }) => {
+        statusEl.className = "";
+        if (typeof file === "string" && file.length > 20) {
+          statusEl.textContent = `Downloading and initializing LLM: ${file}`;
+        } else {
+          const pct = total ? ((loaded / total) * 100).toFixed(0) : "?";
+          statusEl.textContent = `Loading ${stage} (${file}): ${pct}%`;
+        }
+      }, modelName)
+        .then(() => {
+          isReady = true;
+          statusEl.className = "";
+          statusEl.textContent = `Models ready in browser ✅ (Embedder + WebLLM: ${modelName.split("-")[0]})`;
+          askBtn.disabled = false;
+        })
+        .catch((err) => {
+          console.error("Error loading models:", err);
+          statusEl.className = "error";
+          statusEl.textContent = `❌ Error loading models: ${err.message}`;
+        });
+    }
+
+    // Preload default selected model on startup
+    loadActiveModel(modelSelect.value);
+
+    // Listen for model switches
+    modelSelect.addEventListener("change", () => {
+      if (isGenerating) {
+        alert("Cannot change model during response generation.");
+        return;
+      }
+      loadActiveModel(modelSelect.value);
+    });
+
+    // PDF upload and processing
+    pdfDropzone.addEventListener("click", () => {
+      if (!isIngesting) pdfInput.click();
+    });
+
+    pdfDropzone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      pdfDropzone.style.borderColor = "#0284c7";
+    });
+
+    pdfDropzone.addEventListener("dragleave", () => {
+      pdfDropzone.style.borderColor = "#94a3b8";
+    });
+
+    pdfDropzone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      pdfDropzone.style.borderColor = "#94a3b8";
+      const file = e.dataTransfer?.files?.[0];
+      if (file && file.type === "application/pdf") {
+        processPdfFile(file);
+      } else {
+        pdfStatus.className = "error";
+        pdfStatus.textContent = "Please select a valid PDF file.";
+      }
+    });
+
+    pdfInput.addEventListener("change", (e) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        processPdfFile(file);
+      }
+    });
+
+    async function processPdfFile(file) {
+      if (!isReady) {
+        alert("Please wait for models to load before processing a PDF.");
+        return;
+      }
+      isIngesting = true;
+      pdfStatus.className = "";
+      pdfStatus.textContent = `Processing "${file.name}"...`;
+
+      try {
+        const result = await ingestPdf(file, {
+          onProgress: ({ text }) => {
+            pdfStatus.textContent = text;
+          },
+        });
+        pdfStatus.className = "success";
+        pdfStatus.textContent = `✅ "${file.name}" indexed successfully (${result.inserted} chunks saved in Postgres). You can now ask questions about it!`;
+      } catch (err) {
+        console.error("Error indexing PDF:", err);
+        pdfStatus.className = "error";
+        pdfStatus.textContent = `❌ Error indexing PDF: ${err.message}`;
+      } finally {
+        isIngesting = false;
+        pdfInput.value = "";
+      }
+    }
+
+    // RAG query
+    async function handleAsk() {
+      const query = queryEl.value.trim();
+      if (!query || !isReady || isGenerating) return;
+
+      isGenerating = true;
+      askBtn.disabled = true;
+      outputEl.innerHTML = "<em>Processing query...</em>";
+      chunksContainer.innerHTML = "";
+      chunksSection.style.display = "none";
+      metricsBar.style.display = "none";
+      statusEl.className = "";
+      statusEl.textContent = "1/3 Initiating query...";
+
+      let firstToken = true;
+
+      try {
+        await ask(query, {
+          modelName: modelSelect.value,
+          onStatus: (st) => {
+            statusEl.textContent = st;
+          },
+          onChunks: (chunks, { embedMs, backendMs }) => {
+            // Show metrics
+            metricsBar.style.display = "flex";
+            metricsBar.innerHTML = `
+              <span class="metric-badge">⚡ Embedding: <strong>${embedMs} ms</strong></span>
+              <span class="metric-badge">🔍 Backend /api/search: <strong>${backendMs} ms</strong></span>
+              <span class="metric-badge">📑 Chunks retrieved: <strong>${chunks.length}</strong></span>
+            `;
+
+            // Show retrieved chunks immediately in the interface
+            if (chunks.length > 0) {
+              chunksSection.style.display = "block";
+              chunksContainer.innerHTML = chunks
+                .map((c, idx) => {
+                  const scoreStr = c.score ? `Similarity: ${(c.score * 100).toFixed(1)}%` : `Score: N/A`;
+                  const catStr = c.category ? `<span class="chunk-category" style="background: #f1f5f9; color: #475569; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.75rem; margin-right: 0.4rem; font-weight: 500;">📁 ${c.category}</span>` : "";
+                  const subStr = c.subdomain ? `<span class="chunk-subdomain" style="background: #e0f2fe; color: #0369a1; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.75rem; margin-right: 0.4rem; font-weight: 500;">🏷️ ${c.subdomain}</span>` : "";
+                  
+                  // The source field can include " (page X)" at the end. Extract clean filename for download link
+                  const cleanFilename = c.source.split(" (page")[0].trim();
+                  const downloadLink = `<a href="/api/document/${encodeURIComponent(cleanFilename)}" target="_blank" style="color: #0284c7; text-decoration: underline; font-size: 0.75rem; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 0.25rem;" title="View original PDF document">📥 View PDF</a>`;
+                  
+                  return `
+                    <div class="chunk-item" style="margin-bottom: 0.5rem;">
+                      <div class="chunk-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+                        <span style="font-weight: 600; color: #334155; font-size: 0.85rem;">#${idx + 1} ${c.source || "Document"}</span>
+                        <div style="display: flex; align-items: center; gap: 0.25rem;">
+                          ${catStr}
+                          ${subStr}
+                          <span class="chunk-score" style="margin-right: 0.4rem;">${scoreStr}</span>
+                          ${downloadLink}
+                        </div>
+                      </div>
+                      <div style="color: #334155; line-height: 1.5; font-size: 0.85rem; background: #ffffff; border: 1px solid #f1f5f9; padding: 0.5rem; border-radius: 4px;">${c.text}</div>
+                    </div>
+                  `;
+                })
+                .join("");
+            }
+          },
+          onToken: (t) => {
+            if (firstToken) {
+              outputEl.textContent = "";
+              firstToken = false;
+            }
+            outputEl.textContent += t;
+          },
+        });
+        statusEl.className = "success";
+        statusEl.textContent = "Response completed ✅";
+      } catch (err) {
+        console.error("Error during generation:", err);
+        statusEl.className = "error";
+        statusEl.textContent = `❌ Error processing: ${err.message}`;
+        outputEl.innerHTML = `<span class="error">Error: ${err.message}</span>`;
+      } finally {
+        isGenerating = false;
+        askBtn.disabled = false;
+      }
+    }
+
+    askBtn.addEventListener("click", handleAsk);
+
+    queryEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleAsk();
+      }
+    });
+  </script>
+</body>
+</html>

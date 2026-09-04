@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/embedder","backend"
+]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# Nota: no hay un crate "generator" en Rust en este workspace.
+# flarellm (https://github.com/sauravpanda/flarellm) ya se compila y
+# distribuye como paquete wasm+JS propio (@sauravpanda/flare). Se
+# consume directamente desde www/generator.js, igual que harías con
+# cualquier otro paquete wasm de npm. No tiene sentido volver a
+# envolverlo en otro crate nuestro.
