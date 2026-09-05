@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/embedder","backend"
+    "crates/embedder", "backend", "loader"
 ]
 
 [profile.release]

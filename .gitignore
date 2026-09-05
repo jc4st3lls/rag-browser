@@ -1,1 +1,28 @@
+# Rust
 /target
+/Cargo.lock
+
+# Node / Vite
+node_modules/
+/www/node_modules/
+/www/dist/
+
+# Directorios de datos y volúmenes locales de Docker (entrada, salida y base de datos)
+input/
+output/
+files/
+.env
+.env.local
+/data/
+
+# Caché local de modelos Hugging Face o WebLLM
+/huggingface/
+.cache/
+
+# Archivos del sistema operativo y editores
+.DS_Store
+.vscode/
+.idea/
+*.log
+*.tmp
+

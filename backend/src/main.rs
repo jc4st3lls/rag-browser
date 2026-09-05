@@ -1,5 +1,4 @@
 mod db;
-mod embedder;
 mod models;
 
 use axum::{
@@ -12,7 +11,6 @@ use axum::{
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
@@ -21,7 +19,6 @@ use models::{IngestRequest, IngestResponse, SearchRequest, SearchResponse};
 #[derive(Clone)]
 struct AppState {
     pool: PgPool,
-    embedder: Arc<embedder::LocalEmbedder>,
 }
 
 #[tokio::main]
@@ -37,12 +34,7 @@ async fn main() -> anyhow::Result<()> {
         .connect(&database_url)
         .await?;
 
-    // Load embedding model locally in the backend on startup
-    tracing::info!("Loading local embedding model (BGE-small-en)...");
-    let embedder = Arc::new(embedder::LocalEmbedder::load_default().expect("Could not load the embedder"));
-    tracing::info!("Embedding model loaded successfully");
-
-    let state = AppState { pool, embedder };
+    let state = AppState { pool };
 
     // Run hot migrations if the original_documents table does not exist
     sqlx::query(
@@ -130,7 +122,9 @@ async fn ingest(
     Ok(Json(IngestResponse { inserted: count }))
 }
 
-/// Endpoint to upload a PDF directly, process it, and index it into the Postgres database.
+/// Endpoint to upload a PDF directly.
+/// Instead of performing heavy indexing in the backend, it saves the PDF to the input/ folder
+/// and lets the new 'loader' service detect, process, and index it asynchronously.
 async fn ingest_pdf(
     State(state): State<AppState>,
     mut multipart: Multipart,
@@ -150,19 +144,21 @@ async fn ingest_pdf(
         return Err(AppError::BadRequest("No file was sent or the file is empty".into()));
     }
 
-    println!("--> [POST /api/ingest-pdf] Processing uploaded file: '{}' ({} bytes)", filename, pdf_data.len());
+    println!("--> [POST /api/ingest-pdf] Received file: '{}' ({} bytes). Storing in input queue.", filename, pdf_data.len());
 
-    // Save physical PDF to disk volume assigned to backend
-    let files_dir = std::env::var("FILES_DIR").unwrap_or_else(|_| "/data/files".to_string());
-    let _ = tokio::fs::create_dir_all(&files_dir).await;
-    let file_path = std::path::Path::new(&files_dir).join(&filename);
+    // Save physical PDF to the shared input directory for the loader to process
+    let input_dir = std::env::var("INPUT_DIR").unwrap_or_else(|_| "input".to_string());
+    let _ = tokio::fs::create_dir_all(&input_dir).await;
+    let file_path = std::path::Path::new(&input_dir).join(&filename);
+    
     if let Err(e) = tokio::fs::write(&file_path, &pdf_data).await {
-        tracing::warn!("Could not write file to disk ({:?}): {}", file_path, e);
-    } else {
-        tracing::info!("File saved in data volume: {:?}", file_path);
+        tracing::error!("Could not write file to input folder ({:?}): {}", file_path, e);
+        return Err(AppError::Internal(anyhow::anyhow!("Could not queue file for loading: {}", e)));
     }
 
-    // Save original PDF to database for persistence and download
+    tracing::info!("File successfully queued in: {:?}", file_path);
+
+    // Save original PDF to database for persistence and download fallback
     sqlx::query(
         r#"
         INSERT INTO original_documents (filename, file_data)
@@ -176,41 +172,7 @@ async fn ingest_pdf(
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
 
-    // 1. Extract text by pages
-    let pages = embedder::extract_pdf_pages(&pdf_data)
-        .map_err(|e| AppError::BadRequest(format!("Error extracting text from PDF: {}", e)))?;
-
-    if pages.is_empty() {
-        return Err(AppError::BadRequest("The PDF document contains no extractable text.".into()));
-    }
-
-    // Classify document by joining text from the first pages to get thematic content
-    let classification_sample: String = pages.iter().take(3).map(|(_, t)| t.clone()).collect::<Vec<_>>().join(" ");
-    let (category, subdomain) = embedder::classify_text(&classification_sample);
-    println!("--> Document classification: Category='{}', Subdomain='{:?}'", category, subdomain);
-
-    // 2. Fragment into chunks
-    let chunks = embedder::chunk_text(&pages, 450, 80);
-    let mut docs_to_ingest = Vec::new();
-
-    // 3. Generate embeddings and index
-    for (page_num, chunk_text) in chunks {
-        let embedding = state.embedder.embed(&chunk_text)
-            .map_err(|e| AppError::Internal(anyhow::anyhow!("Error generating embedding: {}", e)))?;
-
-        docs_to_ingest.push(models::IngestDocument {
-            source: format!("{} (page {})", filename, page_num), // Store with page in source for the chunk
-            chunk_text,
-            embedding,
-            category: Some(category.clone()),
-            subdomain: subdomain.clone(),
-        });
-    }
-
-    let count = db::insert_documents(&state.pool, docs_to_ingest).await?;
-    println!("<-- [POST /api/ingest-pdf] PDF processed and indexed successfully ({} chunks saved)", count);
-
-    Ok(Json(IngestResponse { inserted: count }))
+    Ok(Json(IngestResponse { inserted: 1 }))
 }
 
 /// Endpoint to download or preview the original PDF.

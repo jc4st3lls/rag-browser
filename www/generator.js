@@ -70,7 +70,7 @@ export async function generateStream(messages, onToken, onStatus, modelName = "L
   const chunks = await eng.chat.completions.create({
     messages,
     temperature: 0.3,
-    max_tokens: 350,
+    max_tokens: 2048,
     stream: true,
   });
 

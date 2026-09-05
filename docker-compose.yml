@@ -21,7 +21,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # 2. Backend en Rust (Axum + Candle Embeddings + Parser de PDF)
+  # 2. Backend en Rust (Axum)
   backend:
     build:
       context: .
@@ -33,6 +33,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/ragdb
+      INPUT_DIR: /data/input
       FILES_DIR: /data/files
       HF_HOME: /data/cache/huggingface
       RUST_LOG: info
@@ -40,6 +41,7 @@ services:
       - "8080:8080"
     volumes:
       # Persistencia de los archivos PDF y caché de modelos del backend
+      - "${HOME}/Data/rag-browser/input:/data/input"
       - "${HOME}/Data/rag-browser/files:/data/files"
 
   # 3. Frontend Web (Vite + Nginx + WebLLM + Candle WASM)
@@ -55,3 +57,26 @@ services:
       - "80:80"
       - "3000:80"
       - "5173:80"
+
+  # 4. Loader en Rust (Indexador de Documentos PDFs asíncrono con barra de progreso)
+  loader:
+    build:
+      context: .
+      dockerfile: Dockerfile_loader
+    container_name: rag-loader
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/ragdb
+      INPUT_DIR: /data/input
+      OUTPUT_DIR: /data/files
+      HF_HOME: /data/cache/huggingface
+      RUST_LOG: info,lopdf=error
+    volumes:
+      # Compartir directorios con el backend y el sistema de archivos local
+      - "${HOME}/Data/rag-browser/input:/data/input"
+      - "${HOME}/Data/rag-browser/files:/data/files"

@@ -19,11 +19,4 @@ pgvector = { version = "0.4", features = ["sqlx"] }
 dotenvy = "0.15"
 anyhow = "1"
 
-# Dependencias para procesar PDF y embeddings en Rust en el backend:
-lopdf = "0.44"
-candle-core = "0.11.0"
-candle-nn = "0.11.0"
-candle-transformers = "0.11.0"
-tokenizers = { version = "0.23.2", default-features = false, features = ["onig"] }
-hf-hub = { version = "1.0.0", features = ["blocking"] }
 

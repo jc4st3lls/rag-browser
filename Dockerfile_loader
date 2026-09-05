@@ -1,0 +1,26 @@
+# Dockerfile para el Loader en Rust (Candle + lopdf + indicatif)
+FROM rust:latest AS builder
+
+WORKDIR /usr/src/loader
+COPY loader .
+
+# Compilar binario optimizado para producción
+RUN cargo install --path .
+
+# Imagen final ligera de ejecución
+FROM debian:trixie-slim AS final
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+    
+# Copiar el binario compilado
+COPY --from=builder /usr/local/cargo/bin/rag-loader /usr/local/bin/rag-loader
+
+# Directorios de volumen para entrada, salida y caché del modelo
+ENV INPUT_DIR=/data/input
+ENV OUTPUT_DIR=/data/files
+ENV HF_HOME=/data/cache/huggingface
+
+CMD ["/usr/local/bin/rag-loader"]

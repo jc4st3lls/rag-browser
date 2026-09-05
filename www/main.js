@@ -11,7 +11,6 @@ import { embedQuery, loadEmbedder } from "./embedder.js";
 import { generateStream, loadGenerator } from "./generator.js";
 
 const BACKEND_SEARCH_URL = "/api/search";
-const BACKEND_INGEST_PDF_URL = "/api/ingest-pdf";
 
 async function searchBackend(embedding, topK = 5) {
   let res;
@@ -33,36 +32,6 @@ async function searchBackend(embedding, topK = 5) {
   }
 
   return res.json(); // expected: { chunks: [{ text, source, score }, ...] }
-}
-
-/**
- * Ingests a PDF file by directly sending binary bytes to the Backend.
- * PDF processing, chunking, and embedding generation
- * now happen 100% on the Rust server, guaranteeing maximum speed and freeing up the browser.
- */
-export async function ingestPdf(file, { onProgress } = {}) {
-  onProgress?.({ stage: "saving", current: 0, total: 1, text: `Sending "${file.name}" to server...` });
-
-  const formData = new FormData();
-  formData.append("file", file);
-
-  let res;
-  try {
-    res = await fetch(BACKEND_INGEST_PDF_URL, {
-      method: "POST",
-      body: formData,
-    });
-  } catch (err) {
-    throw new Error(`Could not connect to backend (${BACKEND_INGEST_PDF_URL}): ${err.message}`);
-  }
-
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => "");
-    throw new Error(`Backend PDF ingest failed (${res.status}): ${errBody || res.statusText}`);
-  }
-
-  const result = await res.json();
-  return { totalChunks: result.inserted, inserted: result.inserted };
 }
 
 function buildPrompt(query, chunks) {
@@ -123,14 +92,12 @@ export async function ask(query, { onToken, onStatus, onChunks, topK = 5, modelN
   const messages = [
     {
       role: "system",
-      content: `You are an expert, professional, and analytical assistant who answers in English. Your goal is to draft rich, exhaustive, structured, and highly professional answers based on the information in the Context.
+      content: `You are a strict QA assistant. Your ONLY source of truth is the provided Context.
 
-Follow these professional guidelines:
-1. Answer completely, in detail, and in-depth. Do not give one-sentence summarized answers if there is sufficient information.
-2. Organize the answer using a structured format (bullet points, bold text, subheaders, or clear sections) to facilitate reading.
-3. Mention the sources or pages of the chunks to add credibility to your analysis (e.g., "according to Chunk X of document Y...").
-4. Ensure the tone is corporate, formal, and of expert consulting.
-5. Use solely and exclusively the factual information contained in the provided Context. If the information is not sufficient to answer in detail, state it professionally.`,
+CRITICAL RULES:
+1. You must answer the user's question using ONLY the facts and data directly mentioned in the Context.
+2. If the Context does not contain the complete and direct answer to the question, or if there is no relevant information, you must reply EXACTLY with: "I'm sorry, but I couldn't find any information about that in the retrieved documents." and NOTHING ELSE.
+3. Absolutely DO NOT use any external knowledge, do not make assumptions, do not extrapolate, and do not invent any details. If it is not explicitly written in the Context, it is considered false and completely unknown to you.`,
     },
     {
       role: "user",

@@ -26,6 +26,19 @@ Backend: búsqueda kNN en la BD vectorial → { chunks }
 [generator.js] → flarellm (GGUF, WebGPU/SIMD) → respuesta en streaming
 ```
 
+### El nuevo componente: Loader (Procesador asíncrono)
+
+Para mantener el backend sumamente liviano y libre de dependencias pesadas de Machine Learning, toda la indexación de documentos PDF se ha extraído al servicio `Loader`.
+
+El Loader funciona de la siguiente manera:
+1. **Detección**: Vigila continuamente una carpeta de entrada (por defecto `input/`).
+2. **Extracción y Clasificación**: Cuando detecta un nuevo archivo `.pdf`, extrae el texto por páginas y lo clasifica temáticamente.
+3. **Embeddings con Barra de Progreso**: Fragmenta el texto en chunks y genera los embeddings vectoriales (usando el modelo local `BGE-small-en-v1.5` en CPU) mostrando una elegante barra de progreso de progreso en la consola.
+4. **Base de Datos**: Guarda el archivo PDF original para persistencia e inserta los chunks con sus embeddings correspondientes en la base de datos PostgreSQL/pgvector.
+5. **Mapeado Final**: Mueve el documento a la carpeta de salida (por defecto `output/` o `files/`), que está compartida con el backend, para que éste pueda servir el documento cuando se solicite desde el frontend.
+
+Si subes un documento PDF desde el frontend, el backend ahora simplemente lo guarda en la carpeta compartida `input/`, y el `Loader` se encarga de procesarlo asíncronamente. También puedes dejar cualquier PDF directamente en la carpeta física `input/` en tu máquina para que sea indexado de inmediato.
+
 Los pesos de ambos modelos se descargan una vez y se cachean en el
 navegador vía Cache API (`www/modelCache.js`); en visitas posteriores no
 hay descarga, solo lectura de disco local.

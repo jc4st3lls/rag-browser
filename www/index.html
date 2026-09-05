@@ -33,9 +33,6 @@
     #output { white-space: pre-wrap; line-height: 1.6; border-left: 3px solid #10b981; padding: 0.85rem 1rem; margin-top: 1rem; min-height: 3rem; background: #f0fdf4; border-radius: 0 8px 8px 0; color: #1e293b; font-size: 0.95rem; }
     
     #status { color: #475569; font-size: 0.9rem; margin-bottom: 0.75rem; padding: 0.4rem 0.6rem; background: #e2e8f0; border-radius: 6px; display: inline-block; }
-    #pdf-status { color: #475569; font-size: 0.85rem; margin-top: 0.5rem; }
-    .file-dropzone { border: 2px dashed #94a3b8; border-radius: 6px; padding: 1.25rem; text-align: center; cursor: pointer; background: #f8fafc; transition: all 0.15s; }
-    .file-dropzone:hover { border-color: #0284c7; background: #f0f9ff; }
     .error { color: #dc2626 !important; font-weight: 600; }
     .success { color: #16a34a !important; font-weight: 600; }
   </style>
@@ -45,16 +42,6 @@
   <p class="subtitle">Embeddings (Candle/WASM) + Vector Search (Postgres) + LLM (Flare/WASM)</p>
   
   <div id="status">Initializing and downloading models…</div>
-
-  <!-- Section to load and index PDFs -->
-  <div class="card">
-    <h2><span>📄 Load PDF document</span></h2>
-    <input type="file" id="pdf-input" accept="application/pdf" style="display: none;" />
-    <div class="file-dropzone" id="pdf-dropzone">
-      <span>Drag a PDF file here or <strong>click to browse</strong></span>
-    </div>
-    <div id="pdf-status"></div>
-  </div>
 
   <!-- Inquiry section -->
   <div class="card">
@@ -95,7 +82,7 @@
   </div>
 
   <script type="module">
-    import { warmUp, ask, ingestPdf } from "./main.js";
+    import { warmUp, ask } from "./main.js";
     import { clearModelCache } from "./modelCache.js";
 
     const statusEl = document.getElementById("status");
@@ -107,14 +94,10 @@
     const chunksSection = document.getElementById("chunks-section");
     const chunksContainer = document.getElementById("chunks-container");
 
-    const pdfInput = document.getElementById("pdf-input");
-    const pdfDropzone = document.getElementById("pdf-dropzone");
-    const pdfStatus = document.getElementById("pdf-status");
     const modelSelect = document.getElementById("model-select");
 
     let isReady = false;
     let isGenerating = false;
-    let isIngesting = false;
 
     clearCacheBtn.addEventListener("click", async () => {
       if (confirm("Do you want to clear the downloaded models cache and reload?")) {
@@ -162,66 +145,6 @@
       }
       loadActiveModel(modelSelect.value);
     });
-
-    // PDF upload and processing
-    pdfDropzone.addEventListener("click", () => {
-      if (!isIngesting) pdfInput.click();
-    });
-
-    pdfDropzone.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      pdfDropzone.style.borderColor = "#0284c7";
-    });
-
-    pdfDropzone.addEventListener("dragleave", () => {
-      pdfDropzone.style.borderColor = "#94a3b8";
-    });
-
-    pdfDropzone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      pdfDropzone.style.borderColor = "#94a3b8";
-      const file = e.dataTransfer?.files?.[0];
-      if (file && file.type === "application/pdf") {
-        processPdfFile(file);
-      } else {
-        pdfStatus.className = "error";
-        pdfStatus.textContent = "Please select a valid PDF file.";
-      }
-    });
-
-    pdfInput.addEventListener("change", (e) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        processPdfFile(file);
-      }
-    });
-
-    async function processPdfFile(file) {
-      if (!isReady) {
-        alert("Please wait for models to load before processing a PDF.");
-        return;
-      }
-      isIngesting = true;
-      pdfStatus.className = "";
-      pdfStatus.textContent = `Processing "${file.name}"...`;
-
-      try {
-        const result = await ingestPdf(file, {
-          onProgress: ({ text }) => {
-            pdfStatus.textContent = text;
-          },
-        });
-        pdfStatus.className = "success";
-        pdfStatus.textContent = `✅ "${file.name}" indexed successfully (${result.inserted} chunks saved in Postgres). You can now ask questions about it!`;
-      } catch (err) {
-        console.error("Error indexing PDF:", err);
-        pdfStatus.className = "error";
-        pdfStatus.textContent = `❌ Error indexing PDF: ${err.message}`;
-      } finally {
-        isIngesting = false;
-        pdfInput.value = "";
-      }
-    }
 
     // RAG query
     async function handleAsk() {

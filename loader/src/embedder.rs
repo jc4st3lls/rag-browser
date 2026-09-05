@@ -1,4 +1,4 @@
-//! PDF extractor and local embedding generator using Candle in the backend (Rust).
+//! PDF extractor and local embedding generator using Candle.
 
 use anyhow::{anyhow, Result};
 use candle_core::{DType, Device, Tensor};
@@ -17,7 +17,7 @@ pub struct LocalEmbedder {
 impl LocalEmbedder {
     /// Downloads from Hugging Face and loads the BGE embedding model into memory.
     pub fn load_default() -> Result<Self> {
-        let device = Device::Cpu; // Run on CPU in the backend
+        let device = Device::Cpu; // Run on CPU
         let client = HFClientSync::new()?;
         let repo = client.model("BAAI", "bge-small-en-v1.5");
 
@@ -79,8 +79,72 @@ impl LocalEmbedder {
     }
 }
 
+#[cfg(unix)]
+struct Silence {
+    original_stdout: std::os::unix::io::RawFd,
+    original_stderr: std::os::unix::io::RawFd,
+}
+
+#[cfg(unix)]
+impl Silence {
+    fn new() -> Option<Self> {
+        use std::os::unix::io::AsRawFd;
+        let null_file = std::fs::OpenOptions::new().write(true).open("/dev/null").ok()?;
+        let null_fd = null_file.as_raw_fd();
+        
+        let original_stdout = unsafe { libc::dup(libc::STDOUT_FILENO) };
+        let original_stderr = unsafe { libc::dup(libc::STDERR_FILENO) };
+        
+        if original_stdout < 0 || original_stderr < 0 {
+            if original_stdout >= 0 { unsafe { libc::close(original_stdout); } }
+            if original_stderr >= 0 { unsafe { libc::close(original_stderr); } }
+            return None;
+        }
+        
+        if unsafe { libc::dup2(null_fd, libc::STDOUT_FILENO) } < 0 {
+            unsafe {
+                libc::close(original_stdout);
+                libc::close(original_stderr);
+            }
+            return None;
+        }
+        
+        if unsafe { libc::dup2(null_fd, libc::STDERR_FILENO) } < 0 {
+            unsafe {
+                let _ = libc::dup2(original_stdout, libc::STDOUT_FILENO);
+                libc::close(original_stdout);
+                libc::close(original_stderr);
+            }
+            return None;
+        }
+        
+        Some(Self {
+            original_stdout,
+            original_stderr,
+        })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Silence {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = libc::dup2(self.original_stdout, libc::STDOUT_FILENO);
+            libc::close(self.original_stdout);
+            
+            let _ = libc::dup2(self.original_stderr, libc::STDERR_FILENO);
+            libc::close(self.original_stderr);
+        }
+    }
+}
+
 /// Extracts text from a PDF in memory and splits it into pages.
 pub fn extract_pdf_pages(bytes: &[u8]) -> Result<Vec<(usize, String)>> {
+    // Silenciar cualquier advertencia interna o println! emitido directamente
+    // por la biblioteca lopdf que ensucie la consola o la barra de progreso.
+    #[cfg(unix)]
+    let _silence = Silence::new();
+
     let doc = PdfDocument::load_mem(bytes)
         .map_err(|e| anyhow!("Could not decode PDF: {}", e))?;
     
@@ -204,9 +268,9 @@ pub fn classify_text(text: &str) -> (String, Option<String>) {
         ("SOC", "Society, Economy and Governance", vec!["geopolitics", "politics", "history", "sociology", "democracy", "government", "culture", "society", "state", "nation"]),
         
         // 4. Strategy, Business and Productivity
-        ("BUS", "Strategy, Business and Productivity", vec!["strategy", "operation", "startup", "revenue", "marketing", "sales", "business", "company", "corporate", "revenues"]),
-        ("PM", "Strategy, Business and Productivity", vec!["project", "scrum", "kanban", "agile", "schedule", "resource", "milestone", "scrummaster", "planning"]),
-        ("PROD", "Strategy, Business and Productivity", vec!["productivity", "time", "learning", "habits", "focus", "meta-knowledge", "concentration"]),
+        ("BUS", "Society, Economy and Governance", vec!["strategy", "operation", "startup", "revenue", "marketing", "sales", "business", "company", "corporate", "revenues"]),
+        ("PM", "Society, Economy and Governance", vec!["project", "scrum", "kanban", "agile", "schedule", "resource", "milestone", "scrummaster", "planning"]),
+        ("PROD", "Society, Economy and Governance", vec!["productivity", "time", "learning", "habits", "focus", "meta-knowledge", "concentration"]),
         
         // 5. Humanities, Culture and Communication
         ("PHIL", "Humanities, Culture and Communication", vec!["philosophy", "ethics", "epistemology", "metaphysics", "morals", "logic", "philosopher"]),
