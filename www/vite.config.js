@@ -1,8 +1,17 @@
 import { defineConfig } from 'vite';
+import { resolve } from 'path';
 
 export default defineConfig({
   optimizeDeps: {
     exclude: ['@sauravpanda/flare'],
+  },
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        documents: resolve(__dirname, 'documents.html'),
+      },
+    },
   },
   server: {
     fs: {

@@ -64,6 +64,15 @@ export async function generateStream(messages, onToken, onStatus, modelName = "L
   onStatus?.("Starting LLM engine in browser...");
   const eng = await loadGenerator(onStatus, modelName);
 
+  // Forzar la limpieza del historial interno del motor de chat de WebLLM
+  // antes de cada pregunta. Esto asegura que no se arrastren contextos, prompts,
+  // ni respuestas previas de sesiones anteriores, garantizando una sesión 100% limpia.
+  try {
+    await eng.resetChat();
+  } catch (e) {
+    console.warn("Could not reset WebLLM chat history:", e);
+  }
+
   onStatus?.("Generating response in streaming...");
   const t0 = performance.now();
 

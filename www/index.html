@@ -35,11 +35,18 @@
     #status { color: #475569; font-size: 0.9rem; margin-bottom: 0.75rem; padding: 0.4rem 0.6rem; background: #e2e8f0; border-radius: 6px; display: inline-block; }
     .error { color: #dc2626 !important; font-weight: 600; }
     .success { color: #16a34a !important; font-weight: 600; }
+    .nav-link { text-decoration: none; font-size: 0.85rem; padding: 0.45rem 0.8rem; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: 600; transition: background 0.15s; cursor: pointer; }
+    .nav-link:hover { background: #e2e8f0; }
   </style>
 </head>
 <body>
-  <h1>In-Browser RAG</h1>
-  <p class="subtitle">Embeddings (Candle/WASM) + Vector Search (Postgres) + LLM (Flare/WASM)</p>
+  <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 0.5rem;">
+    <div>
+      <h1 style="margin: 0;">In-Browser RAG</h1>
+      <p class="subtitle" style="margin-top: 0.25rem; margin-bottom: 0;">Embeddings (Candle/WASM) + Vector Search (Postgres) + LLM (Flare/WASM)</p>
+    </div>
+    <a href="/documents.html" class="nav-link">📂 Manage Library</a>
+  </div>
   
   <div id="status">Initializing and downloading models…</div>
 

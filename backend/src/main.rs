@@ -1,11 +1,12 @@
 mod db;
 mod models;
+mod models_extended;
 
 use axum::{
     extract::{Multipart, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, delete},
     Json, Router,
 };
 use sqlx::postgres::PgPoolOptions;
@@ -66,6 +67,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/ingest", post(ingest))
         .route("/api/ingest-pdf", post(ingest_pdf))
         .route("/api/document/{name}", get(get_document))
+        .route("/api/documents", get(list_documents))
+        .route("/api/documents/{name}", delete(delete_document))
         .layer(cors)
         .layer(body_limit)
         .layer(TraceLayer::new_for_http())
@@ -238,4 +241,76 @@ impl IntoResponse for AppError {
         };
         (status, Json(serde_json::json!({ "error": msg }))).into_response()
     }
+}
+
+/// Devuelve la lista agregada de todos los documentos indexados en el sistema,
+/// agrupados por nombre de archivo original, indicando su clasificación temática,
+/// cantidad de chunks y un pequeño resumen generado con los primeros 150 caracteres.
+async fn list_documents(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<models_extended::DocumentInfo>>, AppError> {
+    println!("--> [GET /api/documents] Listando todos los documentos indexados...");
+    
+    // Obtenemos los documentos agrupando a partir del prefijo en el source (p.ej. "manual.pdf (page 1)" -> "manual.pdf")
+    let rows = sqlx::query_as::<_, models_extended::DocumentInfo>(
+        r#"
+        SELECT 
+            -- Extraemos el nombre original del PDF quitando el sufijo " (page X)" del campo source
+            CASE 
+                WHEN source LIKE '% (page %' THEN SUBSTRING(source FROM 1 FOR POSITION(' (page ' IN source) - 1)
+                ELSE source
+            END as filename,
+            MAX(category) as category,
+            MAX(subdomain) as subdomain,
+            COUNT(*) as chunk_count,
+            -- Creamos un pequeño resumen descriptivo a partir del inicio del primer chunk del documento
+            SUBSTRING(MIN(chunk_text) FROM 1 FOR 150) || '...' as summary
+        FROM documents
+        GROUP BY filename
+        ORDER BY filename ASC
+        "#
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| AppError::Internal(e.into()))?;
+
+    Ok(Json(rows))
+}
+
+/// Endpoint para eliminar completamente un documento tanto de la base de datos
+/// (chunks vectoriales y archivo original) como del volumen físico.
+async fn delete_document(
+    State(state): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    println!("--> [DELETE /api/documents/{}] Solicitando borrado total del documento...", name);
+
+    let mut tx = state.pool.begin().await.map_err(|e| AppError::Internal(e.into()))?;
+
+    // 1. Eliminar chunks de la tabla documents
+    let file_prefix = format!("{}%", name);
+    sqlx::query("DELETE FROM documents WHERE source LIKE $1")
+        .bind(&file_prefix)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    // 2. Eliminar del registro de original_documents
+    sqlx::query("DELETE FROM original_documents WHERE filename = $1")
+        .bind(&name)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
+    tx.commit().await.map_err(|e| AppError::Internal(e.into()))?;
+
+    // 3. Eliminar archivo físico de la carpeta compartida (files/)
+    let files_dir = std::env::var("FILES_DIR").unwrap_or_else(|_| "/data/files".to_string());
+    let file_path = std::path::Path::new(&files_dir).join(&name);
+    if file_path.exists() {
+        let _ = tokio::fs::remove_file(&file_path).await;
+        println!("    [+] Archivo físico eliminado en disco: {:?}", file_path);
+    }
+
+    Ok(Json(serde_json::json!({ "status": "success", "deleted": name })))
 }

@@ -15,11 +15,11 @@ pub struct LocalEmbedder {
 }
 
 impl LocalEmbedder {
-    /// Downloads from Hugging Face and loads the BGE embedding model into memory.
+    /// Downloads from Hugging Face and loads the multilingual embedding model.
     pub fn load_default() -> Result<Self> {
         let device = Device::Cpu; // Run on CPU
         let client = HFClientSync::new()?;
-        let repo = client.model("BAAI", "bge-small-en-v1.5");
+        let repo = client.model("sentence-transformers", "paraphrase-multilingual-MiniLM-L12-v2");
 
         // Download required files
         let weights_path = repo.download_file().filename("model.safetensors").send()?;

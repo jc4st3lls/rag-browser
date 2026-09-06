@@ -8,10 +8,10 @@ import init, { Embedder } from "../crates/embedder/pkg/embedder.js";
 import embedderWasmUrl from "../crates/embedder/pkg/embedder_bg.wasm?url";
 import { fetchWithCache, fetchTextWithCache } from "./modelCache.js";
 
-// Ejemplo con bge-small-en-v1.5 cuantizado en safetensors. Cambia por
-// bge-m3 si necesitas mejor soporte multilingüe (catalán/español).
+// Ejemplo con un modelo multilingüe de alto rendimiento y 384 dimensiones
+// que permite buscar en español, catalán, inglés, etc. sin alterar la base de datos.
 const MODEL_BASE =
-  "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main";
+  "https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/main";
 
 let embedderInstance = null;
 let embedderPromise = null;

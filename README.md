@@ -1,154 +1,117 @@
-# RAG en el navegador (Rust + WASM)
+# In-Browser RAG (Rust + WASM)
 
-Esqueleto de RAG donde tanto la interpretación de la query (embeddings)
-como la generación de la respuesta corren **enteramente en el cliente**.
-El backend solo hace de motor de búsqueda vectorial: recibe un embedding,
-devuelve los chunks más relevantes, y no toca ningún LLM.
+An efficient RAG (Retrieval-Augmented Generation) prototype where both **Query Embedding (Candle/WASM)** and **Response Generation (WebLLM/WASM)** run **entirely in the user's browser**. The backend behaves strictly as a lightweight, fast vector search engine: it receives a vector, executes a kNN query, and returns the top chunks, without running any heavy LLM.
 
-## Arquitectura
+---
+
+## Architecture
 
 ```
-Usuario escribe query
+User writes a query
       │
       ▼
-[embedder.js]  → wasm de Candle (crates/embedder) → vector embedding
+[embedder.js]  → Candle WASM (crates/embedder) → 384-dim Vector Embedding
       │
       ▼
-POST /api/search  { embedding, top_k }   ← único tráfico de red por turno
+POST /api/search  { embedding, top_k }   ← Only network traffic per turn
       │
       ▼
-Backend: búsqueda kNN en la BD vectorial → { chunks }
+Backend: kNN Search on Postgres + pgvector → { chunks }
       │
       ▼
-[main.js] construye el prompt con los chunks recuperados
+[main.js] builds the rich context prompt using retrieved chunks
       │
       ▼
-[generator.js] → flarellm (GGUF, WebGPU/SIMD) → respuesta en streaming
+[generator.js] → WebLLM (GGUF, WebGPU / CPU Fallback) → Streaming Response
 ```
 
-### El nuevo componente: Loader (Procesador asíncrono)
+Model weights are downloaded only once and stored locally in the browser using the **Cache API** (`www/modelCache.js`). Subsequent visits retrieve the models instantly from local disk.
 
-Para mantener el backend sumamente liviano y libre de dependencias pesadas de Machine Learning, toda la indexación de documentos PDF se ha extraído al servicio `Loader`.
+---
 
-El Loader funciona de la siguiente manera:
-1. **Detección**: Vigila continuamente una carpeta de entrada (por defecto `input/`).
-2. **Extracción y Clasificación**: Cuando detecta un nuevo archivo `.pdf`, extrae el texto por páginas y lo clasifica temáticamente.
-3. **Embeddings con Barra de Progreso**: Fragmenta el texto en chunks y genera los embeddings vectoriales (usando el modelo local `BGE-small-en-v1.5` en CPU) mostrando una elegante barra de progreso de progreso en la consola.
-4. **Base de Datos**: Guarda el archivo PDF original para persistencia e inserta los chunks con sus embeddings correspondientes en la base de datos PostgreSQL/pgvector.
-5. **Mapeado Final**: Mueve el documento a la carpeta de salida (por defecto `output/` o `files/`), que está compartida con el backend, para que éste pueda servir el documento cuando se solicite desde el frontend.
+## Component: Async Loader (rag-loader)
 
-Si subes un documento PDF desde el frontend, el backend ahora simplemente lo guarda en la carpeta compartida `input/`, y el `Loader` se encarga de procesarlo asíncronamente. También puedes dejar cualquier PDF directamente en la carpeta física `input/` en tu máquina para que sea indexado de inmediato.
+To keep the Backend lightweight and free of heavy machine learning dependency overhead, all PDF indexing has been extracted to a standalone service: `Loader`.
 
-Los pesos de ambos modelos se descargan una vez y se cachean en el
-navegador vía Cache API (`www/modelCache.js`); en visitas posteriores no
-hay descarga, solo lectura de disco local.
+### How it works:
+1. **Directory Watch**: Monitors the `input/` folder for new `.pdf` files.
+2. **Auto-Clean & Deduplication**: If an indexed document with the same filename is dropped again, the Loader automatically cleanses the database (deleting old chunks and fallback original entries) and deletes old physical files to prevent duplication and junk data.
+3. **Extraction & Classification**: Extracts text page-by-page from the PDF using `lopdf`. It classifies the document dynamically into categories and subdomains (e.g., `Technology, Science and Computing`, `AI`, `DEV`).
+4. **Chunks & Embeddings with Live Progress**: Fragments text into larger semantic chunks (**size: 1000 chars, overlap: 150 chars**). Generates L2-normalized vector embeddings using a local multilingual model, displaying a clean progress bar in the terminal console.
+5. **Database Sync**: Inserts original PDF data into the database and saves all text chunks alongside their 384-dimensional vectors.
+6. **Final Transfer**: Copies the processed PDF file to the shared `files/` output folder for the Backend to serve when requested by the Frontend, and safely purges the original from `input/` (fully cross-device/volume compatible).
 
-## Por qué no hay un crate "generator" en Rust
+---
 
-`flarellm` ya se compila y publica como paquete wasm+JS
-(`@sauravpanda/flare`). Envolverlo en otro crate Rust nuestro añadiría una
-capa de indirección sin beneficio — se consume directamente desde JS,
-igual que harías con cualquier motor wasm de terceros. El único crate
-Rust propio de este proyecto es `embedder`, porque ahí sí queremos control
-total sobre el modelo de embeddings y su pooling/normalización.
+## Component: Document Library Manager
 
-## Despliegue con Docker Compose (Recomendado)
+A professional multi-page interface has been integrated into the frontend (`www/documents.html`) to manage your library independently from the main chat:
+* **Interactive Live Search**: Filter the indexed documents by filename as you type.
+* **Alphabetical Filter (A-Z)**: Click any letter to immediately find documents starting with that character.
+* **Pagination (10 per page)**: Clear, clean, and fast navigation for massive libraries.
+* **Metadata & Summary**: View each document's chunk count, its categories, and a dynamically generated summary/preview.
+* **Total Deletion**: Single-click deletion which transactionally deletes all vector embeddings from Postgres and deletes its physical file from disk.
 
-El proyecto incluye un entorno multicontenedor completo con inicialización automática.
+---
 
-⚠️ **NOTA CRÍTICA PARA EL DESPLIEGUE EN DOCKER**:
-Para evitar compilar el compilador de Rust, `cargo` y `wasm-pack` dentro de la imagen del frontend (lo cual ralentiza el despliegue y genera errores de compilación de dependencias del sandbox de Docker), **el frontend se construye asumiendo que el paquete WASM del embedder ya ha sido precompilado en tu máquina local**.
+## Deployment with Docker Compose (Recommended)
 
-Por lo tanto, **SIEMPRE debes compilar el WASM localmente antes de levantar o reconstruir Docker Compose**:
+The project includes a complete multi-container setup with auto-initialization.
+
+⚠️ **CRITICAL DEPLOYMENT NOTE**:
+To avoid compiling Rust and Node build environments inside Docker (which slows down deployment and raises sandbox issues), **the frontend build assumes that the embedder WASM package has already been compiled on your local host**.
+
+Always compile the WASM locally before starting or rebuilding Docker Compose:
 
 ```bash
-# 1. Compilar el paquete WASM localmente en tu host (se realiza en 1 segundo):
+# 1. Compile the WASM package on your host (takes ~1 second):
 cd crates/embedder
 wasm-pack build --target web --release
 cd ../..
 
-# 2. Levantar el despliegue con Docker Compose:
+# 2. Start deployment using Docker Compose:
 docker compose up -d --build
 ```
 
-### Servicios incluidos:
+### Services included:
 1. **`db` (`pgvector/pgvector:pg16`)**:
-   - Inicializa automáticamente la extensión `vector` y las tablas a partir de `backend/migrations/001_init.sql`.
-   - Volumen persistente en tu máquina local mapeado a: `${HOME}/Data/rag-browser/database`.
-2. **`backend` (Rust / Axum + Candle)**:
-   - Extrae texto de PDFs de forma asíncrona, clasifica temáticamente el documento usando la taxonomía de la aplicación y calcula los embeddings vectoriales en el servidor de forma instantánea.
-   - Volumen persistente en tu máquina para almacenar los PDFs originales y las cachés del modelo: `${HOME}/Data/rag-browser/files`.
-3. **`frontend` (Nginx + WebLLM + Candle WASM)**:
-   - Servido en los puertos `http://localhost:3000` (o `http://localhost:80`).
-   - Posee un archivo de configuración de Nginx (`www/nginx.conf`) que realiza un proxy inverso automático para que las consultas `/api/` apunten de forma transparente al contenedor del backend, evitando problemas de CORS en producción y permitiendo subidas de PDFs pesados de hasta 200MB.
+   - PostgreSQL with `pgvector` extension.
+   - Automatically runs migrations and schema from `backend/migrations/001_init.sql`.
+   - Local persistent host directory: `${HOME}/Data/rag-browser/database`.
+2. **`backend` (Rust / Axum)**:
+   - Extremely lightweight API service. No heavy AI models.
+   - Performs kNN vector query and serves PDF files.
+   - Local persistent directory: `${HOME}/Data/rag-browser/files` and `/input`.
+3. **`loader` (Rust / Candle Multilingual)**:
+   - Watches `/input` directory, processes PDFs, displays terminal progress bar, and inserts vectors.
+4. **`frontend` (Nginx + WebLLM + Candle WASM)**:
+   - Served on `http://localhost:3000` (or `http://localhost:80`).
+   - Reverse proxies `/api` to the backend seamlessly avoiding CORS issues.
 
 ---
 
-## Build Local (Desarrollo sin Docker)
+## Multi-Language Embedding Models (Improvements & Guidelines)
 
-## Modelos usados por defecto (cambiables)
+By default, the system is configured with the multilingual model **`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`** on both the **Loader** (server-side indexing) and the **Frontend** (client-side query embedding).
 
-- **Embeddings**: `BAAI/bge-small-en-v1.5` — cámbialo por `bge-m3` si
-  necesitas mejor cobertura multilingüe (catalán/español/inglés mezclados).
-- **Generación**: `Qwen2.5-1.5B-Instruct` cuantizado Q4_K_M en GGUF —
-  buena relación tamaño/calidad y buen soporte multilingüe. Alternativas:
-  SmolLM2, Llama-3.2-1B/3B-Instruct, Gemma2-2B.
+### Why this model?
+* **Dimension 384**: Compatible out of the box with the default database schema without altering columns.
+* **Highly lightweight (~115MB)**: Downloads instantly in the browser.
+* **Native Catalan, Spanish, & English support**: It matches semantics across languages. You can index an English document and query in Spanish/Catalan, and pgvector will retrieve the exact English passages.
 
-## Backend (incluido: axum + pgvector)
+### Recommended Alternatives:
 
-El directorio `backend/` es un backend mínimo en Rust que expone
-exactamente el contrato que espera `www/main.js`:
+1. **`intfloat/multilingual-e5-small`**
+   - **Dimension**: 384
+   - **Performance**: High semantic accuracy. For optimal results, add the prefix `"passage: "` during indexing and `"query: "` to user queries.
+2. **`BAAI/bge-m3`**
+   - **Dimension**: 1024 (Requires altering Postgres database column to `vector(1024)`).
+   - **Performance**: Maximum enterprise accuracy, though heavier download size (~560MB) for browsers.
 
-```
-POST /api/search
-Body:  { "embedding": [f32...], "top_k": 5 }
-Resp:  { "chunks": [{ "text": "...", "source": "...", "score": 0.87 }] }
-```
+---
 
-No contiene ningún LLM ni lógica de generación — solo hace kNN sobre
-Postgres+pgvector. Podrías sustituirlo por Qdrant, Weaviate,
-sqlite-vec... el contrato HTTP con el cliente no cambiaría.
+## Production Models (LLM)
 
-### Levantar el backend
-
-```bash
-# 1. Postgres con pgvector (vía Docker, más rápido para probar)
-docker run -d --name rag-pg -p 5432:5432 \
-  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=ragdb \
-  pgvector/pgvector:pg16
-
-# 2. Aplicar la migración
-psql postgres://postgres:postgres@localhost:5432/ragdb \
-  -f backend/migrations/001_init.sql
-
-# 3. (opcional) poblar con datos de prueba
-pip install sentence-transformers psycopg2-binary
-python backend/ingest_example.py
-
-# 4. Arrancar el servidor
-cd backend
-cp .env.example .env
-cargo run
-```
-
-El servidor queda escuchando en `http://localhost:8080`. Ajusta
-`BACKEND_SEARCH_URL` en `www/main.js` si no usas un proxy que lo sirva
-bajo el mismo origen que el frontend.
-
-⚠️ **La dimensión del vector debe coincidir** entre `crates/embedder`
-(`Embedder::dim()`), la columna `vector(384)` de la migración, y el
-modelo usado en `ingest_example.py`. Si cambias de modelo de embeddings,
-actualiza los tres sitios.
-
-## Notas y advertencias
-
-- **flarellm es un proyecto joven**: verifica los nombres de métodos
-  (`load`, `init_gpu`, `begin_stream`, `next_token`) contra su versión
-  actual antes de desplegar — pueden cambiar entre releases.
-- **Tamaño de descarga inicial**: el modelo GGUF de 1.5B en Q4 ronda
-  ~1GB. Considera avisar al usuario y mostrar progreso (ya incluido en
-  `index.html`) antes de la primera carga.
-- **Fallback sin WebGPU**: Safari/navegadores antiguos caerán a SIMD por
-  CPU, más lento pero funcional. Comprueba `navigator.gpu` si quieres
-  degradar la UX conscientemente (p.ej. avisar que la primera respuesta
-  tardará más).
+Supported WebLLM models can be dynamically swapped in the UI dropdown:
+* **Default**: `Llama-3.2-1B-Instruct` (Fast and Smart, ~750MB).
+* **Alternatives**: `Qwen2.5-0.5B-Instruct` (Ultralight, ~350MB), `Qwen2.5-1.5B-Instruct` (Excellent balance, ~1GB), `Llama-3.2-3B-Instruct` (~2GB).

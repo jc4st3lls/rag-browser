@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
     println!("Directorio de salida de documentos: {:?}", output_path);
 
     // Cargar modelo de embeddings Candle
-    println!("Descargando y cargando el modelo de embeddings (BGE-small-en-v1.5) en CPU...");
+    println!("Descargando y cargando el modelo de embeddings multilingüe (paraphrase-multilingual-MiniLM-L12-v2) en CPU...");
     let embedder = Arc::new(embedder::LocalEmbedder::load_default()?);
     println!("Modelo cargado correctamente.");
 
@@ -130,7 +130,9 @@ async fn process_pdf(
     println!("    Categoría clasificada: '{}', Subdominio: '{:?}'", category, subdomain);
 
     // 6. Fragmentar en chunks
-    let chunks = embedder::chunk_text(&pages, 450, 80);
+    // Aumentamos el tamaño de los chunks (chunk_size: 1000 caracteres, overlap: 150 caracteres)
+    // para retener mucho más contexto semántico y que las respuestas sean más ricas.
+    let chunks = embedder::chunk_text(&pages, 1000, 150);
     let total_chunks = chunks.len();
     println!("    Total de chunks generados: {}", total_chunks);
 

@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Document Manager - In-browser RAG</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #1e293b; background: #f8fafc; }
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 1rem; }
+    h1 { font-size: 1.65rem; color: #0f172a; margin: 0; display: flex; align-items: center; gap: 0.5rem; }
+    .btn-nav { text-decoration: none; padding: 0.5rem 1rem; font-size: 0.9rem; font-weight: 600; border-radius: 6px; background: #0284c7; color: white; display: inline-flex; align-items: center; gap: 0.25rem; transition: background 0.15s; }
+    .btn-nav:hover { background: #0369a1; }
+    
+    .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
+    
+    /* Buscador y Filtros */
+    .filter-bar { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.25rem; }
+    .search-input { flex: 1; min-width: 200px; padding: 0.55rem 0.8rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.95rem; outline: none; }
+    .search-input:focus { border-color: #0284c7; box-shadow: 0 0 0 2px rgba(2,132,199,0.15); }
+    
+    /* Filtros por iniciales de alfabeto */
+    .alphabet-filter { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 1px solid #f1f5f9; }
+    .alpha-btn { padding: 0.3rem 0.55rem; font-size: 0.8rem; font-weight: 600; border-radius: 4px; border: 1px solid #e2e8f0; background: white; color: #475569; cursor: pointer; transition: all 0.1s; }
+    .alpha-btn:hover { background: #f1f5f9; border-color: #cbd5e1; }
+    .alpha-btn.active { background: #0284c7; color: white; border-color: #0284c7; }
+    
+    /* Lista de Documentos */
+    .docs-list { display: flex; flex-direction: column; gap: 0.85rem; }
+    .doc-item { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.5rem; transition: box-shadow 0.15s; }
+    .doc-item:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
+    
+    .doc-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; }
+    .doc-title { font-size: 1rem; font-weight: 600; color: #0f172a; margin: 0; display: flex; align-items: center; gap: 0.4rem; }
+    .doc-badge-row { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+    
+    .badge-category { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; font-weight: 500; }
+    .badge-subdomain { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; font-weight: 500; }
+    .badge-chunks { background: #f5f5f5; color: #404040; border: 1px solid #e5e5e5; font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 500; }
+    
+    .doc-summary { font-size: 0.88rem; color: #475569; margin: 0; line-height: 1.45; font-style: italic; background: #f8fafc; padding: 0.6rem 0.8rem; border-radius: 6px; border-left: 3px solid #cbd5e1; }
+    
+    .doc-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 0.4rem; font-size: 0.8rem; color: #64748b; }
+    .btn-delete { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; font-size: 0.75rem; padding: 0.35rem 0.75rem; font-weight: 600; border-radius: 4px; cursor: pointer; transition: background 0.15s; }
+    .btn-delete:hover { background: #fca5a5; color: #7f1d1d; }
+    .btn-download { color: #0284c7; text-decoration: underline; font-weight: 500; }
+    
+    /* Paginación */
+    .pagination { display: flex; align-items: center; justify-content: center; gap: 0.4rem; margin-top: 1.5rem; }
+    .page-btn { padding: 0.4rem 0.75rem; font-size: 0.85rem; font-weight: 600; border-radius: 6px; border: 1px solid #cbd5e1; background: white; color: #334155; cursor: pointer; transition: all 0.1s; }
+    .page-btn:hover { background: #f1f5f9; }
+    .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .page-btn.active { background: #0284c7; color: white; border-color: #0284c7; }
+    .page-info { font-size: 0.85rem; color: #64748b; margin: 0 0.5rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📂 Document Library Manager</h1>
+    <a href="/" class="btn-nav">💬 Go to Chat RAG</a>
+  </header>
+
+  <main class="card">
+    <!-- Buscador e Iniciales -->
+    <div class="filter-bar">
+      <input type="text" id="search-box" class="search-input" placeholder="🔍 Search document by filename..." />
+      <button id="refresh-btn" class="page-btn">🔄 Refresh</button>
+    </div>
+
+    <!-- Filtro por abecedario -->
+    <div class="alphabet-filter" id="alpha-container">
+      <button class="alpha-btn active" data-letter="ALL">ALL</button>
+      <!-- Generado dinámicamente -->
+    </div>
+
+    <!-- Lista de Documentos -->
+    <div id="docs-container" class="docs-list">
+      <!-- Rellenado dinámicamente -->
+    </div>
+
+    <!-- Paginación de 10 en 10 -->
+    <div class="pagination" id="pagination-container">
+      <!-- Rellenado dinámicamente -->
+    </div>
+  </main>
+
+  <script type="module">
+    let allDocuments = [];
+    let filteredDocuments = [];
+    let currentPage = 1;
+    const itemsPerPage = 10;
+    let activeLetter = "ALL";
+
+    const docsContainer = document.getElementById("docs-container");
+    const paginationContainer = document.getElementById("pagination-container");
+    const searchBox = document.getElementById("search-box");
+    const refreshBtn = document.getElementById("refresh-btn");
+    const alphaContainer = document.getElementById("alpha-container");
+
+    // Generar botones del abecedario A-Z
+    function initAlphabet() {
+      const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+      let html = '<button class="alpha-btn active" data-letter="ALL">ALL</button>';
+      html += alphabet
+        .map(l => `<button class="alpha-btn" data-letter="${l}">${l}</button>`)
+        .join("");
+      alphaContainer.innerHTML = html;
+
+      const buttons = alphaContainer.querySelectorAll(".alpha-btn");
+      buttons.forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          buttons.forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+          activeLetter = btn.getAttribute("data-letter");
+          currentPage = 1;
+          applyFilters();
+        });
+      });
+    }
+
+    // Cargar documentos del backend
+    async function loadDocuments() {
+      docsContainer.innerHTML = `
+        <div style="text-align: center; color: #64748b; padding: 2rem; font-size: 0.95rem;">
+          <em>Loading documents...</em>
+        </div>
+      `;
+      try {
+        const res = await fetch("/api/documents");
+        if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+        allDocuments = await res.json();
+        applyFilters();
+      } catch (err) {
+        console.error("Error loading documents:", err);
+        docsContainer.innerHTML = `
+          <div style="text-align: center; color: #dc2626; padding: 2rem; font-size: 0.95rem; font-weight: 500;">
+            ❌ Error connecting to database: ${err.message}
+          </div>
+        `;
+      }
+    }
+
+    // Filtrar localmente por buscador e iniciales de letra
+    function applyFilters() {
+      const query = searchBox.value.trim().toLowerCase();
+      
+      filteredDocuments = allDocuments.filter(doc => {
+        const name = doc.filename.toLowerCase();
+        
+        // Filtro por buscador
+        const matchesQuery = name.includes(query);
+        
+        // Filtro por abecedario
+        let matchesLetter = true;
+        if (activeLetter !== "ALL") {
+          matchesLetter = doc.filename.toUpperCase().startsWith(activeLetter);
+        }
+        
+        return matchesQuery && matchesLetter;
+      });
+
+      renderList();
+    }
+
+    // Renderizar la página actual de documentos
+    function renderList() {
+      if (filteredDocuments.length === 0) {
+        docsContainer.innerHTML = `
+          <div style="text-align: center; color: #64748b; padding: 3rem; font-size: 0.95rem;">
+            No documents found matching your search criteria.
+          </div>
+        `;
+        paginationContainer.innerHTML = "";
+        return;
+      }
+
+      const totalPages = Math.ceil(filteredDocuments.length / itemsPerPage);
+      if (currentPage > totalPages) currentPage = 1;
+
+      const startIndex = (currentPage - 1) * itemsPerPage;
+      const endIndex = startIndex + itemsPerPage;
+      const pageItems = filteredDocuments.slice(startIndex, endIndex);
+
+      docsContainer.innerHTML = pageItems
+        .map(doc => {
+          const summary = doc.summary || "No summary available.";
+          const subdomainBadge = doc.subdomain 
+            ? `<span class="badge-subdomain">🏷️ ${doc.subdomain}</span>` 
+            : "";
+          const downloadUrl = `/api/document/${encodeURIComponent(doc.filename)}`;
+
+          return `
+            <div class="doc-item">
+              <div class="doc-header">
+                <h4 class="doc-title">📄 ${doc.filename}</h4>
+                <div class="doc-badge-row">
+                  <span class="badge-category">📁 ${doc.category}</span>
+                  ${subdomainBadge}
+                  <span class="badge-chunks">${doc.chunk_count} chunks</span>
+                </div>
+              </div>
+              <p class="doc-summary">${summary}</p>
+              <div class="doc-footer">
+                <a href="${downloadUrl}" target="_blank" class="btn-download" title="View PDF">📥 Open original PDF</a>
+                <button class="btn-delete" data-filename="${encodeURIComponent(doc.filename)}">🗑️ Delete Document</button>
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+
+      // Configurar botones de borrado
+      const deleteButtons = docsContainer.querySelectorAll(".btn-delete");
+      deleteButtons.forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          const filename = decodeURIComponent(e.target.getAttribute("data-filename"));
+          if (confirm(`Are you sure you want to completely delete "${filename}"?\n\nThis will remove all associated vector embeddings and its physical file.`)) {
+            await deleteDoc(filename);
+          }
+        });
+      });
+
+      renderPagination(totalPages);
+    }
+
+    // Renderizar los controles de paginación
+    function renderPagination(totalPages) {
+      if (totalPages <= 1) {
+        paginationContainer.innerHTML = "";
+        return;
+      }
+
+      let html = `
+        <button class="page-btn" id="prev-page" ${currentPage === 1 ? "disabled" : ""}>Previous</button>
+      `;
+
+      for (let i = 1; i <= totalPages; i++) {
+        html += `
+          <button class="page-btn ${i === currentPage ? "active" : ""}" data-page="${i}">${i}</button>
+        `;
+      }
+
+      html += `
+        <button class="page-btn" id="next-page" ${currentPage === totalPages ? "disabled" : ""}>Next</button>
+      `;
+
+      paginationContainer.innerHTML = html;
+
+      // Eventos de botones numéricos
+      const pageButtons = paginationContainer.querySelectorAll(".page-btn[data-page]");
+      pageButtons.forEach(btn => {
+        btn.addEventListener("click", () => {
+          currentPage = parseInt(btn.getAttribute("data-page"));
+          renderList();
+        });
+      });
+
+      // Anterior / Siguiente
+      const prevBtn = document.getElementById("prev-page");
+      const nextBtn = document.getElementById("next-page");
+
+      if (prevBtn) {
+        prevBtn.addEventListener("click", () => {
+          if (currentPage > 1) {
+            currentPage--;
+            renderList();
+          }
+        });
+      }
+
+      if (nextBtn) {
+        nextBtn.addEventListener("click", () => {
+          if (currentPage < totalPages) {
+            currentPage++;
+            renderList();
+          }
+        });
+      }
+    }
+
+    // Llamada de borrado al backend
+    async function deleteDoc(filename) {
+      try {
+        const res = await fetch(`/api/documents/${encodeURIComponent(filename)}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await loadDocuments();
+      } catch (err) {
+        alert(`❌ Error deleting document: ${err.message}`);
+      }
+    }
+
+    // Buscador interactivo en vivo
+    searchBox.addEventListener("input", () => {
+      currentPage = 1;
+      applyFilters();
+    });
+
+    refreshBtn.addEventListener("click", loadDocuments);
+
+    // Arrancar la interfaz
+    initAlphabet();
+    loadDocuments();
+  </script>
+</body>
+</html>

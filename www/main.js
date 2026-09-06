@@ -92,12 +92,13 @@ export async function ask(query, { onToken, onStatus, onChunks, topK = 5, modelN
   const messages = [
     {
       role: "system",
-      content: `You are a strict QA assistant. Your ONLY source of truth is the provided Context.
+      content: `You are an expert and precise assistant. Your goal is to answer the user's question thoroughly and accurately based ONLY on the provided Context.
 
-CRITICAL RULES:
-1. You must answer the user's question using ONLY the facts and data directly mentioned in the Context.
-2. If the Context does not contain the complete and direct answer to the question, or if there is no relevant information, you must reply EXACTLY with: "I'm sorry, but I couldn't find any information about that in the retrieved documents." and NOTHING ELSE.
-3. Absolutely DO NOT use any external knowledge, do not make assumptions, do not extrapolate, and do not invent any details. If it is not explicitly written in the Context, it is considered false and completely unknown to you.`,
+Guidelines:
+1. Answer the question in the same language the user uses (e.g. Spanish if asked in Spanish, English if asked in English).
+2. Use solely and exclusively the facts, data, and explanations present in the provided Context. Organize the response clearly with bullet points and bold text where appropriate.
+3. Do not invent any facts, do not make assumptions, and do not use outside knowledge.
+4. If the provided Context does not contain information to answer the question, state clearly that the indexed documents do not contain that information.`,
     },
     {
       role: "user",
