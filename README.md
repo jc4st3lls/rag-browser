@@ -2,6 +2,10 @@
 
 An efficient RAG (Retrieval-Augmented Generation) prototype where both **Query Embedding (Candle/WASM)** and **Response Generation (WebLLM/WASM)** run **entirely in the user's browser**. The backend behaves strictly as a lightweight, fast vector search engine: it receives a vector, executes a kNN query, and returns the top chunks, without running any heavy LLM.
 
+<p align="center">
+  <img src="assets/raginbrowser.png" alt="In-Browser RAG Frontend Interface" width="750">
+</p>
+
 ---
 
 ## Architecture
