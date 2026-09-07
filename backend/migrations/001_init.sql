@@ -21,9 +21,10 @@ CREATE TABLE IF NOT EXISTS original_documents (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Approximate index for cosine similarity nearest neighbor search.
+-- HNSW index for cosine similarity nearest neighbor search.
+-- Unlike IVFFLAT, HNSW is built for dynamic updates and can be created on an empty table
+-- while maintaining near-perfect recall (accuracy) as new documents are inserted.
 CREATE INDEX IF NOT EXISTS documents_embedding_idx
     ON documents
-    USING ivfflat (embedding vector_cosine_ops)
-    WITH (lists = 100);
+    USING hnsw (embedding vector_cosine_ops);
 
