@@ -115,3 +115,26 @@ By default, the system is configured with the multilingual model **`sentence-tra
 Supported WebLLM models can be dynamically swapped in the UI dropdown:
 * **Default**: `Llama-3.2-1B-Instruct` (Fast and Smart, ~750MB).
 * **Alternatives**: `Qwen2.5-0.5B-Instruct` (Ultralight, ~350MB), `Qwen2.5-1.5B-Instruct` (Excellent balance, ~1GB), `Llama-3.2-3B-Instruct` (~2GB).
+
+---
+
+## Security Disclaimer & Scope
+
+This project is a **Proof of Concept (PoC)** and is intended solely for local testing and research purposes.
+* **No Authentication/Authorization**: The system does not implement any layer of user authentication, session control, or authorization (RBAC) to restrict access to API endpoints or the Document Library Manager.
+* **No Communication Security**: Network channels, file transfers, and database connections are unencrypted by default and do not employ HTTPS/TLS certificates.
+* **Safety Scope**: Do not deploy this project in public production environments without implementing a reverse proxy with TLS/SSL encryption, robust API gateway firewalls, authentication layers, and sanitization filters.
+
+---
+
+## Collaborators
+
+* **Jordi Castells** (Main developer)
+* **GitHub Copilot** running **Google Gemini 3.5 Flash** (AI pairing assistant & co-architect)
+
+---
+
+## License
+
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
+
